@@ -28,7 +28,9 @@ describe("PiWebApp model dialog", () => {
     vi.spyOn(SessionController.prototype, "listModelCatalog").mockResolvedValue([{ provider: "openai", id: "gpt-5", enabled: true }]);
     const send = vi.spyOn(SessionController.prototype, "send").mockResolvedValue(undefined);
 
-    callSendPrompt(app, "  /model  ");
+    // Active sessions submit through the follow-up/steer path. Slash-command
+    // handling must still stay in the browser rather than reaching sessiond.
+    callSendPrompt(app, "  /model  ", "followUp");
 
     await vi.waitFor(() => { expect(appModelDialog(app)?.title).toBe("Select Model"); });
     expect(send).not.toHaveBeenCalled();
@@ -330,10 +332,10 @@ async function callAppMethod(app: PiWebApp, name: "openModelDialog"): Promise<vo
   await Reflect.apply(method, app, []);
 }
 
-function callSendPrompt(app: PiWebApp, text: string): void {
+function callSendPrompt(app: PiWebApp, text: string, streamingBehavior?: "steer" | "followUp"): void {
   const method: unknown = Reflect.get(app, "sendPrompt");
   if (typeof method !== "function") throw new Error("PiWebApp prompt sender was unavailable");
-  Reflect.apply(method, app, [text]);
+  Reflect.apply(method, app, [text, streamingBehavior]);
 }
 
 async function callToggleHandler(app: PiWebApp, provider: string, modelId: string, enabled: boolean): Promise<void> {
