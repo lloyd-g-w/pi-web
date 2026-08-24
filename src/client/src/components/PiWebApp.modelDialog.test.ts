@@ -16,6 +16,25 @@ afterEach(() => {
 const modelDialogOrigin = { machineId: "local", sessionId: "session-1", cwd: "/repo" } as const;
 
 describe("PiWebApp model dialog", () => {
+  it("opens from the /model command instead of forwarding it to the session runtime", async () => {
+    const app = new PiWebApp();
+    const selectedSession = session("session-1");
+    setAppState(app, {
+      selectedSession,
+      sessions: [selectedSession],
+      status: sessionStatus(selectedSession.id, { provider: "openai", id: "gpt-5" }),
+    });
+    vi.spyOn(SessionController.prototype, "listModels").mockResolvedValue([{ provider: "openai", id: "gpt-5" }]);
+    vi.spyOn(SessionController.prototype, "listModelCatalog").mockResolvedValue([{ provider: "openai", id: "gpt-5", enabled: true }]);
+    const send = vi.spyOn(SessionController.prototype, "send").mockResolvedValue(undefined);
+
+    callSendPrompt(app, "  /model  ");
+
+    await vi.waitFor(() => { expect(appModelDialog(app)?.title).toBe("Select Model"); });
+    expect(send).not.toHaveBeenCalled();
+    expect(appModelDialog(app)?.selectedValue).toBe("openai/gpt-5");
+  });
+
   it("opens with the enabled options, the full catalog, and the current selection", async () => {
     const app = new PiWebApp();
     const selectedSession = session("session-1");
@@ -309,6 +328,12 @@ async function callAppMethod(app: PiWebApp, name: "openModelDialog"): Promise<vo
   const method: unknown = Reflect.get(app, name);
   if (typeof method !== "function") throw new Error(`PiWebApp ${name} was unavailable`);
   await Reflect.apply(method, app, []);
+}
+
+function callSendPrompt(app: PiWebApp, text: string): void {
+  const method: unknown = Reflect.get(app, "sendPrompt");
+  if (typeof method !== "function") throw new Error("PiWebApp prompt sender was unavailable");
+  Reflect.apply(method, app, [text]);
 }
 
 async function callToggleHandler(app: PiWebApp, provider: string, modelId: string, enabled: boolean): Promise<void> {
