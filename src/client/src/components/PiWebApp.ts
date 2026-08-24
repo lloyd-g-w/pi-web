@@ -2048,8 +2048,8 @@ export class PiWebApp extends LitElement {
 
   private sendPrompt(text: string, streamingBehavior?: "steer" | "followUp", attachments?: import("../api").PromptAttachment[], delivery?: import("../../../shared/apiTypes").PromptAttachmentDelivery): void {
     const hasAttachments = attachments !== undefined && attachments.length > 0;
-    if (!hasAttachments && streamingBehavior === undefined) {
-      if (this.auth.handleSlashCommand(text)) return;
+    if (!hasAttachments) {
+      if (streamingBehavior === undefined && this.auth.handleSlashCommand(text)) return;
       if (text.trim() === "/model") {
         void this.openModelDialog();
         return;
