@@ -64,7 +64,7 @@ describe("PluginRegistry", () => {
     registry.register({ id: "core", plugin: corePlugin });
 
     expect(registry.getActions(createContext().context).some((action) => action.id === "core:actions.show")).toBe(true);
-    expect(registry.getWorkspacePanels().map((panel) => panel.id)).toEqual(["core:workspace.files", "core:workspace.terminal"]);
+    expect(registry.getWorkspacePanels().map((panel) => panel.id)).toEqual(["core:workspace.files", "core:workspace.pi-tui", "core:workspace.terminal"]);
   });
 
   it("rejects legacy browser plugins with an attributed API-version error", () => {

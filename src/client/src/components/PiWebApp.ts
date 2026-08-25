@@ -18,6 +18,7 @@ import { WorkspaceController } from "../controllers/workspaceController";
 import { emptyMachineNavigationSnapshot, machineNavigationSnapshotFromState, routeFromMachineNavigationSnapshot, SessionStorageMachineNavigationMemory, type MachineNavigationSnapshot, type WorkspaceRouteSurface } from "../controllers/machineNavigationMemory";
 import { SessionStorageSessionSelectionMemory } from "../controllers/sessionSelection";
 import { SessionStorageTerminalSelectionMemory } from "../controllers/terminalSelection";
+import { excludePiTuiTerminal, isPiTuiTerminal } from "../piTuiTerminal";
 import { SessionStorageWorkspaceSelectionMemory } from "../controllers/workspaceSelection";
 import { KeyboardShortcutDispatcher } from "../keyboardShortcuts";
 import { selectedMachineId } from "../controllers/types";
@@ -995,7 +996,10 @@ export class PiWebApp extends LitElement {
     if (workspace === undefined) return;
     const cwd = event.type === "terminal.closed" ? event.cwd : event.terminal.cwd;
     if (cwd !== workspace.path) return;
-    if (event.type === "terminal.created" && !event.terminal.exited) this.activeTerminalIds.add(event.terminal.id);
+    // The dedicated Pi TUI terminal (see PiTuiPanel) is excluded from this count,
+    // matching TerminalPanel's own tab list, so the ordinary Terminal tab's badge
+    // reflects only the shells it actually shows.
+    if (event.type === "terminal.created" && !event.terminal.exited && !isPiTuiTerminal(event.terminal)) this.activeTerminalIds.add(event.terminal.id);
     else this.activeTerminalIds.delete(event.type === "terminal.closed" ? event.terminalId : event.terminal.id);
     if (event.type === "terminal.closed") {
       this.terminalSelection.forgetTerminal(event.terminalId);
@@ -1010,7 +1014,7 @@ export class PiWebApp extends LitElement {
       const terminals = await terminalsApi.terminals(workspace.projectId, workspace.id, machineId);
       if (selectedMachineId(this.state) !== machineId || this.state.selectedWorkspace?.id !== workspace.id) return;
       this.activeTerminalIds.clear();
-      for (const terminal of terminals) {
+      for (const terminal of excludePiTuiTerminal(terminals)) {
         if (!terminal.exited) this.activeTerminalIds.add(terminal.id);
       }
       this.setState({ activeTerminalCount: this.activeTerminalIds.size });

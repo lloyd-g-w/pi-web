@@ -14,6 +14,14 @@ export function createCoreWorkspacePanels(): WorkspacePanelContribution[] {
       render: renderFiles,
     },
     {
+      id: "workspace.pi-tui",
+      title: "Pi",
+      icon: renderBuiltinTabIcon("pi-tui"),
+      order: 20,
+      routeAliases: ["pi"],
+      render: renderPiTui,
+    },
+    {
       id: "workspace.terminal",
       title: "Terminal",
       icon: renderBuiltinTabIcon("terminal"),
@@ -33,6 +41,15 @@ function renderTerminal(context: WorkspacePanelContext): TemplateResult {
   return html`<terminal-panel .workspace=${context.workspace} .machineId=${context.machine.id} .selectedTerminalId=${context.selectedTerminalId} .autoStart=${context.terminalAutoStart} .onSelectTerminal=${context.onSelectTerminal}></terminal-panel>`;
 }
 
+function renderPiTui(context: WorkspacePanelContext): TemplateResult {
+  loadPiTuiPanel();
+  return html`<pi-tui-panel .workspace=${context.workspace} .machineId=${context.machine.id}></pi-tui-panel>`;
+}
+
 function loadTerminalPanel(): void {
   void import("../../components/TerminalPanel");
+}
+
+function loadPiTuiPanel(): void {
+  void import("../../components/PiTuiPanel");
 }
