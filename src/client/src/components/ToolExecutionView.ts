@@ -2,11 +2,12 @@ import { LitElement, css, html } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { writeClipboardText } from "../clipboard";
 import type { ToolExecutionPart } from "./shared";
+import { isSubagentToolName, subagentChildRows, subagentMetaBadges, subagentToolTarget, type SubagentChildRow } from "./subagentToolPresentation";
 
 const MAX_COLLAPSED_DIFF_LINES = 180;
 
 interface ToolTarget {
-  label: "Command" | "File" | "Input";
+  label: "Command" | "File" | "Input" | "Agent" | "Workflow" | "Action";
   text: string;
 }
 
@@ -30,6 +31,9 @@ export class ToolExecutionView extends LitElement {
     const errorText = execution.status === "error" ? execution.resultText : preview?.error;
     const bodyText = visibleDiff === undefined ? execution.resultText : undefined;
     const target = toolTarget(execution, path);
+    const isSubagent = isSubagentToolName(execution.toolName);
+    const subagentBadges = isSubagent ? subagentMetaBadges(execution.args, execution.details) : [];
+    const childRows = isSubagent ? subagentChildRows(execution.details) : [];
 
     return html`
       <section class=${`tool-card ${execution.status}`}>
@@ -40,6 +44,7 @@ export class ToolExecutionView extends LitElement {
             ${this.renderHeaderTarget(target)}
           </div>
           <div class="tool-meta">
+            ${subagentBadges.map((badge) => html`<span class="badge">${badge}</span>`)}
             ${editCountLabel(execution) === undefined ? null : html`<span>${editCountLabel(execution)}</span>`}
             ${diffStats === undefined ? null : html`<span class="diff-stats"><b class="added">+${diffStats.added}</b><span>/</span><b class="removed">-${diffStats.removed}</b></span>`}
             <span class="status-label">${statusLabel(execution.status)}</span>
@@ -48,8 +53,25 @@ export class ToolExecutionView extends LitElement {
 
         ${previewMismatch ? html`<p class="notice">Applied diff differs from the preview.</p>` : null}
         ${errorText === undefined || errorText === "" ? null : html`<pre class="error-text">${errorText}</pre>`}
+        ${childRows.length === 0 ? null : this.renderSubagentChildren(childRows)}
         ${visibleDiff === undefined ? this.renderTextBody(bodyText, execution.status === "error", target) : this.renderDiffBody(visibleDiff, actualDiff === undefined ? "Preview diff" : "Applied diff", target)}
       </section>
+    `;
+  }
+
+  private renderSubagentChildren(rows: SubagentChildRow[]) {
+    return html`
+      <ul class="subagent-children">
+        ${rows.map((row) => html`
+          <li class=${`subagent-child ${row.status}`}>
+            <span class="status-icon" aria-hidden="true">${subagentChildStatusIcon(row.status)}</span>
+            <strong>${row.agent}</strong>
+            ${row.taskPreview === undefined ? null : html`<span class="summary" title=${row.taskPreview}>${row.taskPreview}</span>`}
+            ${row.tokens === undefined ? null : html`<span class="child-meta">${String(row.tokens)} tok</span>`}
+            ${row.cost === undefined ? null : html`<span class="child-meta">${formatChildCost(row.cost)}</span>`}
+          </li>
+        `)}
+      </ul>
     `;
   }
 
@@ -138,7 +160,15 @@ export class ToolExecutionView extends LitElement {
     .path, .summary { display: block; flex: 1 1 auto; min-width: 0; max-width: 100%; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: thin; white-space: pre; color: var(--pi-accent); font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; direction: ltr; text-align: left; unicode-bidi: isolate; }
     .summary { color: var(--pi-muted); font-family: inherit; }
     .tool-meta { flex: 0 0 auto; display: inline-flex; align-items: baseline; gap: 8px; color: var(--pi-muted); font-size: 12px; }
+    .badge { border: 1px solid var(--pi-border-muted); border-radius: 999px; padding: 1px 7px; text-transform: uppercase; letter-spacing: .03em; font-size: 11px; color: var(--pi-muted); }
     .diff-stats { display: inline-flex; gap: 3px; }
+    .subagent-children { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+    .subagent-child { display: flex; align-items: baseline; gap: 7px; min-width: 0; border: 1px solid var(--pi-border-muted); border-radius: 6px; padding: 5px 7px; font-size: 12px; }
+    .subagent-child.error { border-color: var(--pi-danger); }
+    .subagent-child.timedOut, .subagent-child.stopped, .subagent-child.interrupted { border-color: var(--pi-warning-border); }
+    .subagent-child strong { flex: 0 0 auto; }
+    .subagent-child .summary { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--pi-muted); font-family: inherit; }
+    .subagent-child .child-meta { flex: 0 0 auto; color: var(--pi-dim); }
     .added, .diff .added { color: var(--pi-success); }
     .removed, .diff .removed { color: var(--pi-danger); }
     .status-label { text-transform: uppercase; letter-spacing: .04em; color: var(--pi-muted); }
@@ -173,11 +203,25 @@ export class ToolExecutionView extends LitElement {
 }
 
 function toolTarget(execution: ToolExecutionPart, path: string | undefined): ToolTarget | undefined {
+  const subagentTarget = subagentToolTarget(execution.toolName, execution.args);
+  if (subagentTarget !== undefined) return subagentTarget;
   if (path !== undefined && path !== "") return { label: "File", text: path };
   const command = getString(execution.args, "command");
   if (command !== undefined && command !== "") return { label: "Command", text: command };
   if (execution.summary !== "") return { label: "Input", text: execution.summary };
   return undefined;
+}
+
+function subagentChildStatusIcon(status: SubagentChildRow["status"]): string {
+  if (status === "success") return "✓";
+  if (status === "error") return "✖";
+  if (status === "timedOut") return "⏱";
+  if (status === "stopped") return "■";
+  return "⊘";
+}
+
+function formatChildCost(cost: number): string {
+  return cost < 0.01 ? `$${cost.toFixed(4)}` : `$${cost.toFixed(2)}`;
 }
 
 function pathFromArgs(args: unknown): string | undefined {
