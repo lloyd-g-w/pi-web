@@ -7,6 +7,7 @@ import "@xterm/xterm/css/xterm.css";
 import { terminalSocket, terminalsApi, type TerminalCommandRun, type TerminalInfo, type Workspace } from "../api";
 import { writeClipboardText } from "../clipboard";
 import { selectFallbackTerminal, selectPreferredTerminal } from "../controllers/terminalSelection";
+import { excludePiTuiTerminal } from "../piTuiTerminal";
 import { createTerminalCopySnapshot, DEFAULT_TERMINAL_ANSI_THEME, type TerminalCopyRunStyle, type TerminalCopySnapshot } from "../terminalCopySnapshot";
 import { createTerminalSoftKeysDefaultEnvironmentMedia, hasTerminalSoftKeysPreference, initialTerminalSoftKeysEnabled, isTerminalSoftKeysDefaultEnvironment, writeTerminalSoftKeysPreference } from "../terminalSoftKeysPreference";
 import "./TerminalSoftKeys";
@@ -28,6 +29,16 @@ export class TerminalPanel extends LitElement {
   @property() machineId = "local";
   @property({ attribute: false }) selectedTerminalId: string | undefined;
   @property({ type: Boolean }) autoStart = false;
+  /** Hide the terminal tab strip/new-shell button for a host that drives terminal selection itself, such as the dedicated Pi TUI panel. */
+  @property({ type: Boolean }) hideTabs = false;
+  /**
+   * Input to send once, right after this exact terminal's socket connects for
+   * the first time — for example execing an interactive program into a freshly
+   * created shell. Ignored for a terminal id this panel has already sent it to,
+   * even across reconnects or prop churn, so a host can pass a stable value
+   * without resending on every re-render.
+   */
+  @property({ attribute: false }) initialInput: { terminalId: string; data: string } | undefined;
   @property({ attribute: false }) onSelectTerminal: (terminalId: string | undefined, options?: { replace?: boolean | undefined }) => void = () => undefined;
   @query(".terminal-host") private terminalHost?: HTMLDivElement | null;
   @query(".terminal-copy-content") private terminalCopyContent?: HTMLPreElement | null;
@@ -56,6 +67,7 @@ export class TerminalPanel extends LitElement {
   private loadedCwd: string | undefined;
   private autoStartConsumedCwd: string | undefined;
   private commandRunPollTimer: number | undefined;
+  private initialInputSentForTerminalId: string | undefined;
   private readonly softKeysDefaultEnvironmentMedia = createTerminalSoftKeysDefaultEnvironmentMedia();
   private softKeysPreferenceStored = hasTerminalSoftKeysPreference();
   private readonly onSoftKeysDefaultEnvironmentChange = () => {
@@ -152,11 +164,14 @@ export class TerminalPanel extends LitElement {
         terminalsApi.terminals(workspace.projectId, workspace.id, this.machineId),
         terminalsApi.listCommandRuns({ projectId: workspace.projectId, workspaceId: workspace.id }, this.machineId),
       ]);
-      this.terminals = terminals;
+      // The dedicated Pi TUI terminal (see PiTuiPanel) is created through the same
+      // per-workspace terminal list, but it belongs to the Pi tab, not this ordinary
+      // shell tab strip, so it is excluded here rather than at the API/server layer.
+      this.terminals = excludePiTuiTerminal(terminals);
       this.commandRuns = commandRuns;
       this.selectPreferredLoadedTerminal({ replaceUrl: true });
       this.updateCommandRunPolling(this.hasPendingCommandRuns(commandRuns));
-      if (terminals.length === 0 && shouldAutoStart) await this.startTerminal();
+      if (this.terminals.length === 0 && shouldAutoStart) await this.startTerminal();
     } catch (error) {
       this.error = error instanceof Error ? error.message : String(error);
     } finally {
@@ -331,7 +346,10 @@ export class TerminalPanel extends LitElement {
     const socket = terminalSocket(projectId, workspaceId, terminalId, initialSize, this.machineId);
     socket.binaryType = "arraybuffer";
     this.socket = socket;
-    socket.addEventListener("open", () => { this.fitAndNotify(); });
+    socket.addEventListener("open", () => {
+      this.fitAndNotify();
+      this.sendInitialInputIfDue(terminalId);
+    });
     socket.addEventListener("message", (event) => {
       void this.handleSocketMessage(event.data, terminalId, terminal);
     });
@@ -410,6 +428,13 @@ export class TerminalPanel extends LitElement {
   private sendTerminalInput(data: string): void {
     const filtered = filterTerminalInput(data);
     if (filtered !== "") this.send({ type: "input", data: filtered });
+  }
+
+  private sendInitialInputIfDue(terminalId: string): void {
+    const initialInput = this.initialInput;
+    if (initialInput?.terminalId !== terminalId || this.initialInputSentForTerminalId === terminalId) return;
+    this.initialInputSentForTerminalId = terminalId;
+    this.send({ type: "input", data: initialInput.data });
   }
 
   private sendSoftKeyInput(data: string, options: TerminalSoftKeyInputOptions): void {
@@ -654,17 +679,19 @@ export class TerminalPanel extends LitElement {
   override render() {
     return html`
       <section class="terminal-shell">
-        <div class="terminal-tabs">
-          ${this.renderCopyModeToggle()}
-          ${this.renderSoftKeysToggle()}
-          ${this.terminals.map((terminal) => html`
-            <button class=${this.selectedId === terminal.id ? "selected" : ""} @click=${() => { this.selectTerminal(terminal.id); }}>
-              <span>${terminal.name}${terminal.exited ? " · exited" : ""}</span>
-              <small @click=${(event: Event) => { void this.closeTerminal(terminal.id, event); }}>×</small>
-            </button>
-          `)}
-          <button class="new" ?disabled=${this.workspace === undefined} @click=${() => { void this.startTerminal(); }}>+ Shell</button>
-        </div>
+        ${this.hideTabs ? null : html`
+          <div class="terminal-tabs">
+            ${this.renderCopyModeToggle()}
+            ${this.renderSoftKeysToggle()}
+            ${this.terminals.map((terminal) => html`
+              <button class=${this.selectedId === terminal.id ? "selected" : ""} @click=${() => { this.selectTerminal(terminal.id); }}>
+                <span>${terminal.name}${terminal.exited ? " · exited" : ""}</span>
+                <small @click=${(event: Event) => { void this.closeTerminal(terminal.id, event); }}>×</small>
+              </button>
+            `)}
+            <button class="new" ?disabled=${this.workspace === undefined} @click=${() => { void this.startTerminal(); }}>+ Shell</button>
+          </div>
+        `}
         ${this.error === undefined ? null : html`<p class="error">${this.error}</p>`}
         ${this.renderCommandRunNotice()}
         ${this.renderTerminalAccessoryBar()}
